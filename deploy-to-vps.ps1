@@ -4,7 +4,7 @@ param(
     [int]$Port = 22,
     [string]$RemoteDir = "/opt/api-vcom-chat",
     [string]$RemoteArchive = "/opt/api-vcom-chat.tar.gz",
-    [switch]$RestartCompose,
+    [bool]$RestartCompose = $true,
     [switch]$SkipHostKeyCheck = $true
 )
 
@@ -109,9 +109,10 @@ $remoteScript = $remoteScript.Replace("__REMOTE_DIR__", $RemoteDir)
 $remoteScript = $remoteScript.Replace("__REMOTE_ARCHIVE__", $RemoteArchive)
 
 if ($RestartCompose) {
+    $remoteScript = $remoteScript.TrimEnd() + "`n"
     $remoteScript += @'
 cd '__REMOTE_DIR__'
-docker compose -f compose.vps.yml up -d --build
+docker compose -f compose.vps.yml up -d --build --force-recreate api-vcom-chat
 '@
     $remoteScript = $remoteScript.Replace("__REMOTE_DIR__", $RemoteDir)
 }
@@ -121,8 +122,8 @@ Invoke-ExternalChecked -FilePath "ssh" -Arguments ($sshArgs + @("${UserName}@${H
 
 Write-Host "Proceso completado."
 if ($RestartCompose) {
-    Write-Host "La aplicacion fue reiniciada con docker compose."
+    Write-Host "La aplicacion se reconstruyo y reinicio (api-vcom-chat) con docker compose."
 } else {
     Write-Host "Si quieres reconstruir y levantar la API, ejecuta en la VPS:"
-    Write-Host "  cd $RemoteDir && docker compose up -d --build"
+    Write-Host "  cd $RemoteDir && docker compose -f compose.vps.yml up -d --build --force-recreate api-vcom-chat"
 }
