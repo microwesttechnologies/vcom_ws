@@ -15,13 +15,14 @@ services:
       CORS_ORIGIN: "*"
       CHAT_ENABLE_MOCK_USERS: "false"
       CHAT_UPLOAD_DIR: storage/chat-media
-      CHAT_PUBLIC_BASE_URL: https://ws.tudominio.com
-      FCM_PROJECT_ID: ""
-      FCM_SERVICE_ACCOUNT_JSON: ""
+      CHAT_PUBLIC_BASE_URL: https://wschat.vcommunity.cloud
+      FCM_PROJECT_ID: vcom-chat
+      FCM_SERVICE_ACCOUNT_FILE: /app/firebase-service-account.json
     depends_on:
       - postgres
     volumes:
       - chat_media:/app/storage/chat-media
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
 
   postgres:
     image: postgres:16

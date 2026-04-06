@@ -74,7 +74,8 @@ $includePaths = @(
     ".dockerignore",
     ".env.example",
     "README.md",
-    "compose.vps.yml"
+    "compose.vps.yml",
+    "firebase-service-account.json"
 ) | Where-Object {
     Test-Path (Join-Path $projectRoot $_)
 }
