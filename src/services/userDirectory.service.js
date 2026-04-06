@@ -20,6 +20,23 @@ const MOCK_USERS = [
   },
 ];
 
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+
+    const base64 = parts[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch (_) {
+    return null;
+  }
+}
+
 function getMockUserById(userId) {
   return MOCK_USERS.find((item) => String(item.id_user) === String(userId)) || null;
 }
@@ -108,6 +125,33 @@ function toInt(value) {
   return null;
 }
 
+async function getConversationParticipantFallback(currentUserId) {
+  const result = await pool.query(
+    `SELECT DISTINCT other_user_id
+     FROM (
+       SELECT participant_b AS other_user_id
+       FROM chat_conversations
+       WHERE participant_a = $1
+       UNION
+       SELECT participant_a AS other_user_id
+       FROM chat_conversations
+       WHERE participant_b = $1
+     ) t`,
+    [String(currentUserId)],
+  );
+
+  return result.rows
+    .map((row) => String(row.other_user_id || '').trim())
+    .filter(Boolean)
+    .map((id) => ({
+      id_user: id,
+      name_user: `Usuario ${id.slice(0, 8)}`,
+      role_user: 'unknown',
+      is_online: false,
+      last_seen: null,
+    }));
+}
+
 async function getMonitorRoleIds(token) {
   try {
     const rolesPayload = await vcomApiService.getRoles(token);
@@ -135,14 +179,50 @@ class UserDirectoryService {
       return getMockUserById(token.replace('mock-', 'mock-'));
     }
 
-    const data = await vcomApiService.getPermissions(token);
-    const user = data.user || {};
-    const role = user.role_user || data.role?.name_role || data.role?.role_user || null;
+    try {
+      const data = await vcomApiService.getPermissions(token);
+      const user = data.user || {};
+      const role = user.role_user || data.role?.name_role || data.role?.role_user || null;
+
+      return {
+        id_user: String(user.id_user ?? user.id ?? ''),
+        name_user: user.name_user ?? user.name ?? 'Usuario',
+        role_user: role ?? 'unknown',
+      };
+    } catch (error) {
+      const status = error?.response?.status;
+      const shouldFallbackToToken =
+        !status ||
+        status === 404 ||
+        status >= 500;
+
+      if (!shouldFallbackToToken) {
+        throw error;
+      }
+    }
+
+    const payload = decodeJwtPayload(token);
+    if (!payload?.user_id) {
+      throw new Error('No fue posible resolver el usuario desde el token');
+    }
+
+    try {
+      const user = await this.getUserById(token, payload.user_id);
+      if (user?.id_user) {
+        return {
+          id_user: String(user.id_user),
+          name_user: user.name_user ?? payload.name_user ?? payload.name ?? 'Usuario',
+          role_user: user.role_user ?? payload.role_user ?? 'unknown',
+        };
+      }
+    } catch (_) {
+      // noop: se usa fallback con claims del token
+    }
 
     return {
-      id_user: String(user.id_user ?? user.id ?? ''),
-      name_user: user.name_user ?? user.name ?? 'Usuario',
-      role_user: role ?? 'unknown',
+      id_user: String(payload.user_id ?? ''),
+      name_user: payload.name_user ?? payload.name ?? payload.email ?? 'Usuario',
+      role_user: payload.role_user ?? 'unknown',
     };
   }
 
@@ -197,9 +277,14 @@ class UserDirectoryService {
         users = unwrapCollection(usersPayload);
       }
     } catch (_) {
-      const usersPayload = await vcomApiService.getUsers(token);
-      users = unwrapCollection(usersPayload);
-      usersFromRoleEndpoints = false;
+      try {
+        const usersPayload = await vcomApiService.getUsers(token);
+        users = unwrapCollection(usersPayload);
+        usersFromRoleEndpoints = false;
+      } catch (_) {
+        users = [];
+        usersFromRoleEndpoints = false;
+      }
     }
 
     const allowedBase = (Array.isArray(users) ? users : [])
@@ -232,6 +317,14 @@ class UserDirectoryService {
         }
       }
       allowed = Array.from(byId.values());
+    }
+
+    if (allowed.length === 0) {
+      try {
+        allowed = await getConversationParticipantFallback(currentUserId);
+      } catch (_) {
+        // noop: si no se puede consultar la DB, se mantiene arreglo vacio
+      }
     }
 
     if (allowed.length === 0) return allowed;

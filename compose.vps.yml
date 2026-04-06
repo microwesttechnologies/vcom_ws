@@ -1,0 +1,39 @@
+services:
+  api-vcom-chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-vcom-chat
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/vcom_chat
+      VCOM_API_BASE_URL: https://vcamb.microwesttechnologies.com
+      CORS_ORIGIN: "*"
+      CHAT_ENABLE_MOCK_USERS: "false"
+      CHAT_UPLOAD_DIR: storage/chat-media
+      CHAT_PUBLIC_BASE_URL: https://ws.tudominio.com
+      FCM_PROJECT_ID: ""
+      FCM_SERVICE_ACCOUNT_JSON: ""
+    depends_on:
+      - postgres
+    volumes:
+      - chat_media:/app/storage/chat-media
+
+  postgres:
+    image: postgres:16
+    container_name: api-vcom-chat-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vcom_chat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+  chat_media:
