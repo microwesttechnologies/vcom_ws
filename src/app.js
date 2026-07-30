@@ -6,6 +6,7 @@ const { corsOrigin, chatUploadDir } = require('./config/env');
 const pool = require('./db/pool');
 const createChatRouter = require('./routes/chat.routes');
 const createChatMediaRouter = require('./routes/chatMedia.routes');
+const createHubProxyRouter = require('./routes/hubProxy.routes');
 
 function createApp({ wsGateway }) {
   const app = express();
@@ -445,6 +446,7 @@ function createApp({ wsGateway }) {
     }
   });
 
+  app.use('/api/hub', createHubProxyRouter());
   app.use('/api/chat', createChatRouter({ wsGateway }));
   app.use('/api/chat/media', createChatMediaRouter());
   app.use(
