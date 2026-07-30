@@ -37,8 +37,24 @@ class VcomApiService {
     return response.data;
   }
 
+  /** Directorio simplificado de modelos para el chat (sin restricciones de rol). */
+  async getModelsChatDirectory(token) {
+    const response = await this.client.get('/api/v1/models/chat-directory', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  }
+
   async getEmployees(token) {
     const response = await this.client.get('/api/v1/employees', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  }
+
+  /** Directorio simplificado de empleados para el chat (sin restricciones de rol). */
+  async getEmployeesChatDirectory(token) {
+    const response = await this.client.get('/api/v1/employees/chat-directory', {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
