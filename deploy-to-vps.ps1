@@ -118,6 +118,9 @@ docker compose -f compose.vps.yml up -d --build --force-recreate api-vcom-chat
     $remoteScript = $remoteScript.Replace("__REMOTE_DIR__", $RemoteDir)
 }
 
+# Bash rechaza CRLF: 'set -e\r' se interpreta como opcion invalida.
+$remoteScript = $remoteScript -replace "`r`n", "`n" -replace "`r", "`n"
+
 Write-Host "Extrayendo archivos en la VPS"
 Invoke-ExternalChecked -FilePath "ssh" -Arguments ($sshArgs + @("${UserName}@${HostName}", $remoteScript))
 
