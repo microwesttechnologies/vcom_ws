@@ -15,6 +15,8 @@ const { vcomApiBaseUrl } = require('../config/env');
  * }} params
  */
 async function forwardHubPost({ titlePost, content, tagId, mediaFiles, authHeader }) {
+  console.info('[HubProxy→Laravel] authHeader (30):', authHeader?.substring(0, 30));
+  console.info('[HubProxy→Laravel] mediaFiles:', mediaFiles.map(f => f.filename));
   const form = new FormData();
 
   form.append('title_post', titlePost);
