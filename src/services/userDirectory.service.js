@@ -37,6 +37,41 @@ function decodeJwtPayload(token) {
   }
 }
 
+/** Resuelve id de usuario desde claims Laravel (user_id / id_user / sub model:9). */
+function resolveUserIdFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+
+  const direct = payload.user_id ?? payload.id_user ?? payload.userId ?? null;
+  if (direct != null && String(direct).trim() !== '') {
+    return String(direct).trim();
+  }
+
+  const sub = String(payload.sub ?? '').trim();
+  if (!sub) return '';
+  if (sub.includes(':')) {
+    const [, id] = sub.split(':', 2);
+    return String(id || '').trim();
+  }
+  return sub;
+}
+
+function mapUserFromJwtPayload(payload) {
+  const idUser = resolveUserIdFromPayload(payload);
+  if (!idUser) return null;
+
+  return {
+    id_user: idUser,
+    name_user: String(
+      payload.name_user ??
+      payload.name ??
+      payload.email ??
+      payload.email_user ??
+      'Usuario',
+    ).trim() || 'Usuario',
+    role_user: payload.role_user ?? payload.role ?? 'unknown',
+  };
+}
+
 function getMockUserById(userId) {
   return MOCK_USERS.find((item) => String(item.id_user) === String(userId)) || null;
 }
@@ -174,21 +209,33 @@ async function getMonitorRoleIds(token) {
 }
 
 class UserDirectoryService {
+  /**
+   * Resuelve el usuario autenticado.
+   * Laravel /auth/permissions puede devolver solo `{ modules }` sin `user`;
+   * en ese caso se usan los claims del JWT (user_id / sub).
+   */
   async getCurrentUser(token) {
     if (MOCK_ENABLED && (token === 'mock-tes1' || token === 'mock-test2')) {
       return getMockUserById(token.replace('mock-', 'mock-'));
     }
 
+    let permissionsAccepted = false;
+
     try {
       const data = await vcomApiService.getPermissions(token);
+      permissionsAccepted = true;
       const user = data.user || {};
       const role = user.role_user || data.role?.name_role || data.role?.role_user || null;
+      const idUser = String(user.id_user ?? user.id ?? user.user_id ?? '').trim();
 
-      return {
-        id_user: String(user.id_user ?? user.id ?? ''),
-        name_user: user.name_user ?? user.name ?? 'Usuario',
-        role_user: role ?? 'unknown',
-      };
+      if (idUser) {
+        return {
+          id_user: idUser,
+          name_user: user.name_user ?? user.name ?? 'Usuario',
+          role_user: role ?? 'unknown',
+        };
+      }
+      // 200 sin user: continuar con claims del JWT
     } catch (error) {
       const status = error?.response?.status;
       const shouldFallbackToToken =
@@ -201,29 +248,32 @@ class UserDirectoryService {
       }
     }
 
+    return this.resolveUserFromTokenClaims(token, { enrichFromApi: permissionsAccepted });
+  }
+
+  async resolveUserFromTokenClaims(token, { enrichFromApi = true } = {}) {
     const payload = decodeJwtPayload(token);
-    if (!payload?.user_id) {
+    const fromJwt = mapUserFromJwtPayload(payload);
+    if (!fromJwt?.id_user) {
       throw new Error('No fue posible resolver el usuario desde el token');
     }
 
-    try {
-      const user = await this.getUserById(token, payload.user_id);
-      if (user?.id_user) {
-        return {
-          id_user: String(user.id_user),
-          name_user: user.name_user ?? payload.name_user ?? payload.name ?? 'Usuario',
-          role_user: user.role_user ?? payload.role_user ?? 'unknown',
-        };
+    if (enrichFromApi) {
+      try {
+        const user = await this.getUserById(token, fromJwt.id_user);
+        if (user?.id_user) {
+          return {
+            id_user: String(user.id_user),
+            name_user: user.name_user ?? fromJwt.name_user,
+            role_user: user.role_user ?? fromJwt.role_user,
+          };
+        }
+      } catch (_) {
+        // noop: se usa fallback con claims del token
       }
-    } catch (_) {
-      // noop: se usa fallback con claims del token
     }
 
-    return {
-      id_user: String(payload.user_id ?? ''),
-      name_user: payload.name_user ?? payload.name ?? payload.email ?? 'Usuario',
-      role_user: payload.role_user ?? 'unknown',
-    };
+    return fromJwt;
   }
 
   async getUserById(token, userId) {

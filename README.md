@@ -88,8 +88,10 @@ Servidor -> cliente:
 
 Este backend valida el token y consulta usuarios usando:
 
-- `GET /api/v1/auth/permissions`
+- `GET /api/v1/auth/permissions` (espera `user` + `modules`; si `user` no viene, usa claims JWT `user_id` / `sub`)
 - `GET /api/v1/users`
 - `GET /api/v1/users/{id}`
 
 sobre `https://vcamb.microwesttechnologies.com` (o la URL configurada en `VCOM_API_BASE_URL`).
+
+Importante: `VCOM_API_BASE_URL` debe ser el **mismo** host que emitió el JWT en el login de la app.
