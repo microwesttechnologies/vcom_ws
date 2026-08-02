@@ -197,7 +197,8 @@ async function getMonitorRoleIds(token) {
       const name = String(role?.name_role ?? role?.role_name ?? role?.name ?? '')
         .trim()
         .toLowerCase();
-      if (!name.includes('monitor')) continue;
+      // Admin opera como monitor en la app móvil.
+      if (!name.includes('monitor') && !name.includes('admin')) continue;
       const id = toInt(role?.id_role ?? role?.id);
       if (id != null) ids.add(id);
     }
@@ -205,7 +206,18 @@ async function getMonitorRoleIds(token) {
     if (ids.size > 0) return ids;
   } catch (_) {}
 
-  return new Set([3]);
+  return new Set([3, 5]);
+}
+
+function isMonitorLikeEmployee(emp, monitorRoleIds) {
+  const roleText = String(
+    emp?.role_user ?? emp?.role ?? emp?.name_role ?? '',
+  )
+    .trim()
+    .toLowerCase();
+  if (roleText.includes('monitor') || roleText.includes('admin')) return true;
+  const idRole = toInt(emp?.id_role);
+  return idRole != null && monitorRoleIds.has(idRole);
 }
 
 class UserDirectoryService {
@@ -325,26 +337,16 @@ class UserDirectoryService {
           const payload = await vcomApiService.getEmployeesChatDirectory(token);
           const all = unwrapCollection(payload);
           const monitorRoleIds = await getMonitorRoleIds(token);
-          users = all.filter((emp) => {
-            const roleText = String(emp?.role_user ?? emp?.name_role ?? '').trim().toLowerCase();
-            if (roleText.includes('monitor')) return true;
-            const idRole = toInt(emp?.id_role);
-            return idRole != null && monitorRoleIds.has(idRole);
-          });
+          users = all.filter((emp) => isMonitorLikeEmployee(emp, monitorRoleIds));
           console.log(`[chat/contacts] employees/chat-directory => ${all.length} total, ${users.length} monitores`);
         } catch (dirErr) {
           console.warn(`[chat/contacts] chat-directory fallo (${dirErr?.response?.status ?? dirErr?.message}), usando /employees`);
           const employeesPayload = await vcomApiService.getEmployees(token);
           const employees = unwrapCollection(employeesPayload);
           const monitorRoleIds = await getMonitorRoleIds(token);
-          users = (Array.isArray(employees) ? employees : []).filter((employee) => {
-            const roleText = String(employee?.role_user ?? employee?.role ?? employee?.name_role ?? '')
-              .trim()
-              .toLowerCase();
-            if (roleText.includes('monitor')) return true;
-            const idRole = toInt(employee?.id_role);
-            return idRole != null && monitorRoleIds.has(idRole);
-          });
+          users = (Array.isArray(employees) ? employees : []).filter((employee) =>
+            isMonitorLikeEmployee(employee, monitorRoleIds),
+          );
           console.log(`[chat/contacts] /employees => ${employees.length} total, ${users.length} monitores`);
         }
         usersFromRoleEndpoints = true;

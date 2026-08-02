@@ -30,7 +30,11 @@ function createHubProxyRouter() {
    * Headers requeridos: Authorization: Bearer <jwt>
    * Body (multipart/form-data): title_post, content?, tag_id?, media[]?
    */
-  router.post('/posts', upload.any(), async (req, res) => {
+  router.post('/posts', (req, _res, next) => {
+    console.info('[HubProxy] content-type:', req.headers['content-type']);
+    console.info('[HubProxy] content-length:', req.headers['content-length']);
+    next();
+  }, upload.any(), async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ success: false, message: 'No autorizado' });
@@ -41,10 +45,14 @@ function createHubProxyRouter() {
     try {
       const { title_post, content, tag_id } = req.body;
 
-      // Debug: mostrar qué llegó al proxy
       console.info('[HubProxy] body:', { title_post, content, tag_id });
       console.info('[HubProxy] auth (primeros 30):', authHeader?.substring(0, 30));
-      console.info('[HubProxy] files recibidos:', (req.files || []).map(f => ({ field: f.fieldname, size: f.size, mime: f.mimetype })));
+      console.info('[HubProxy] files recibidos:', (req.files || []).map(f => ({
+        field: f.fieldname,
+        original: f.originalname,
+        size: `${Math.round(f.size / 1024 / 1024)} MB`,
+        mime: f.mimetype,
+      })));
 
       if (!title_post) {
         return res.status(422).json({ success: false, message: 'El título es requerido' });

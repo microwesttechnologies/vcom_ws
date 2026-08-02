@@ -11,10 +11,12 @@
  *
  * Se evalua 'monitor' primero: nombres como "monitor de modelos"
  * contienen ambas palabras; sin ese orden se clasificarian como 'model'.
+ * Admin hereda el grupo monitor (misma experiencia en la app móvil).
  */
 function toRoleGroup(role) {
   const normalized = normalizeRole(role);
   if (normalized.includes('monitor')) return 'monitor';
+  if (normalized.includes('admin')) return 'monitor';
   if (normalized.includes('model') || normalized.includes('modal')) return 'model';
   return 'other';
 }
