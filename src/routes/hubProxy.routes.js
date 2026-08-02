@@ -5,7 +5,7 @@ const path = require('path');
 const { compressVideo, cleanupFiles } = require('../services/hubCompressor.service');
 const { forwardHubPost } = require('../services/hubProxy.service');
 
-const MAX_VIDEO_MB = 500;
+const MAX_VIDEO_MB = 200;
 
 const upload = multer({
   storage: multer.diskStorage({

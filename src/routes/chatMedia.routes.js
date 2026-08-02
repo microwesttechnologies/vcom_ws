@@ -9,7 +9,7 @@ const chatMediaService = require('../services/chatMedia.service');
 const { chatUploadDir } = require('../config/env');
 
 const IMAGE_MAX_BYTES = 30 * 1024 * 1024;
-const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
+const VIDEO_MAX_BYTES = 200 * 1024 * 1024;
 const ABSOLUTE_MAX_BYTES = VIDEO_MAX_BYTES;
 const TEMP_UPLOAD_DIR = path.resolve(process.cwd(), chatUploadDir, '_incoming');
 
@@ -64,7 +64,7 @@ function createChatMediaRouter() {
       if (type === 'video' && req.file.size > VIDEO_MAX_BYTES) {
         return res.status(413).json({
           success: false,
-          message: 'El video no debe superar 50MB',
+          message: 'El video no debe superar 200MB',
         });
       }
 
