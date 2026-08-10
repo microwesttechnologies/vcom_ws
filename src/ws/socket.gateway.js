@@ -389,6 +389,7 @@ class SocketGateway {
         state.token,
         state.user.role_user,
         state.user.id_user,
+        state.user,
       );
 
       safeSend(ws, {

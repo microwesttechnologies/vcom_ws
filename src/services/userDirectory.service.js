@@ -1,6 +1,6 @@
 ﻿const vcomApiService = require('./vcomApi.service');
 const pool = require('../db/pool');
-const { toRoleGroup, isAdminRole } = require('../utils/roles');
+const { toRoleGroup, isAdminRole, isAdminActor } = require('../utils/roles');
 
 const MOCK_ENABLED = String(process.env.CHAT_ENABLE_MOCK_USERS || 'false').toLowerCase() === 'true';
 const MOCK_USERS = [
@@ -59,6 +59,8 @@ function mapUserFromJwtPayload(payload) {
   const idUser = resolveUserIdFromPayload(payload);
   if (!idUser) return null;
 
+  const roleId = toInt(payload.id_role ?? payload.role_id ?? payload.roleId);
+
   return {
     id_user: idUser,
     name_user: String(
@@ -69,6 +71,7 @@ function mapUserFromJwtPayload(payload) {
       'Usuario',
     ).trim() || 'Usuario',
     role_user: payload.role_user ?? payload.role ?? 'unknown',
+    role_id: roleId,
   };
 }
 
@@ -231,20 +234,35 @@ class UserDirectoryService {
       return getMockUserById(token.replace('mock-', 'mock-'));
     }
 
+    const fromJwt = mapUserFromJwtPayload(decodeJwtPayload(token));
     let permissionsAccepted = false;
 
     try {
       const data = await vcomApiService.getPermissions(token);
       permissionsAccepted = true;
       const user = data.user || {};
-      const role = user.role_user || data.role?.name_role || data.role?.role_user || null;
+      const role =
+        user.role_user ||
+        data.role?.name_role ||
+        data.role?.role_user ||
+        fromJwt?.role_user ||
+        null;
       const idUser = String(user.id_user ?? user.id ?? user.user_id ?? '').trim();
+      const roleId = toInt(
+        user.role_id ?? user.id_role ?? data.role?.id_role ?? fromJwt?.role_id,
+      );
 
       if (idUser) {
+        // Si permissions trae user sin rol, completar con claims JWT (evita role=unknown).
+        let roleUser = role ?? 'unknown';
+        if ((!role || roleUser === 'unknown') && isAdminActor(null, roleId)) {
+          roleUser = 'admin';
+        }
         return {
           id_user: idUser,
-          name_user: user.name_user ?? user.name ?? 'Usuario',
-          role_user: role ?? 'unknown',
+          name_user: user.name_user ?? user.name ?? fromJwt?.name_user ?? 'Usuario',
+          role_user: roleUser,
+          role_id: roleId,
         };
       }
       // 200 sin user: continuar con claims del JWT
@@ -260,7 +278,15 @@ class UserDirectoryService {
       }
     }
 
-    return this.resolveUserFromTokenClaims(token, { enrichFromApi: permissionsAccepted });
+    const resolved = await this.resolveUserFromTokenClaims(token, {
+      enrichFromApi: permissionsAccepted,
+    });
+    if (resolved && (!resolved.role_user || resolved.role_user === 'unknown')) {
+      if (isAdminActor(resolved, resolved.role_id)) {
+        resolved.role_user = 'admin';
+      }
+    }
+    return resolved;
   }
 
   async resolveUserFromTokenClaims(token, { enrichFromApi = true } = {}) {
@@ -278,6 +304,7 @@ class UserDirectoryService {
             id_user: String(user.id_user),
             name_user: user.name_user ?? fromJwt.name_user,
             role_user: user.role_user ?? fromJwt.role_user,
+            role_id: user.role_id ?? fromJwt.role_id ?? null,
           };
         }
       } catch (_) {
@@ -296,6 +323,25 @@ class UserDirectoryService {
 
     const data = await vcomApiService.getUserById(token, userId);
     return mapUser(unwrapEntity(data));
+  }
+
+  /**
+   * Busca un contacto por id en directorios de modelos + monitores (panel admin).
+   */
+  async resolveDirectoryContactById(token, otherUserId) {
+    const target = String(otherUserId || '').trim();
+    if (!target) return null;
+
+    const [models, monitors] = await Promise.all([
+      this.loadModelsDirectory(token).catch(() => []),
+      this.loadMonitorsDirectory(token).catch(() => []),
+    ]);
+
+    const mapped = [...models, ...monitors]
+      .map(mapUser)
+      .filter((user) => user.id_user);
+
+    return mapped.find((user) => String(user.id_user) === target) || null;
   }
 
   async loadModelsDirectory(token) {
@@ -334,9 +380,9 @@ class UserDirectoryService {
     }
   }
 
-  async getAllowedContacts(token, currentUserRole, currentUserId) {
+  async getAllowedContacts(token, currentUserRole, currentUserId, currentUser = null) {
     const currentGroup = toRoleGroup(currentUserRole);
-    const adminUser = isAdminRole(currentUserRole);
+    const adminUser = isAdminActor(currentUser || currentUserRole, currentUser?.role_id);
 
     if (MOCK_ENABLED && String(currentUserId).startsWith('mock-')) {
       const mockAllowed = MOCK_USERS

@@ -25,6 +25,17 @@ function isAdminRole(role) {
   return normalizeRole(role).includes('admin');
 }
 
+/** Admin por nombre de rol o role_id (Laravel: Admin = 5). */
+function isAdminActor(userOrRole, roleId = null) {
+  if (userOrRole && typeof userOrRole === 'object') {
+    if (isAdminRole(userOrRole.role_user ?? userOrRole.role)) return true;
+    const id = Number(userOrRole.role_id ?? userOrRole.id_role ?? roleId);
+    return id === 5;
+  }
+  if (isAdminRole(userOrRole)) return true;
+  return Number(roleId) === 5;
+}
+
 function canChatBetween(roleA, roleB) {
   // Admin (panel web) puede chatear con modelos y monitores.
   if (isAdminRole(roleA) || isAdminRole(roleB)) {
@@ -41,5 +52,6 @@ module.exports = {
   normalizeRole,
   toRoleGroup,
   isAdminRole,
+  isAdminActor,
   canChatBetween,
 };

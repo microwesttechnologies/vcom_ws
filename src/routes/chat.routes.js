@@ -41,6 +41,7 @@ function createChatRouter({ wsGateway }) {
         req.auth.token,
         req.auth.user.role_user,
         req.auth.user.id_user,
+        req.auth.user,
       );
       res.json({ success: true, data: contacts });
     } catch (error) {
