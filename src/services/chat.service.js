@@ -1,40 +1,16 @@
 ﻿const pool = require('../db/pool');
 const userDirectoryService = require('./userDirectory.service');
-const { canChatBetween, isAdminActor, isAdminRole, toRoleGroup } = require('../utils/roles');
+const {
+  canChatBetween,
+  isAdminActor,
+  toRoleGroup,
+  enrichAdminFromJwt,
+} = require('../utils/roles');
 
 function canonicalPair(a, b) {
   const aStr = String(a);
   const bStr = String(b);
   return aStr < bStr ? [aStr, bStr] : [bStr, aStr];
-}
-
-/** Admin del panel: completar rol desde JWT si /permissions no trae role_user. */
-function enrichAdminFromJwt(token, currentUser) {
-  if (isAdminActor(currentUser)) {
-    return {
-      ...currentUser,
-      role_user: isAdminRole(currentUser.role_user) ? currentUser.role_user : 'admin',
-    };
-  }
-
-  try {
-    const payload = JSON.parse(
-      Buffer.from(String(token || '').split('.')[1] || '', 'base64').toString('utf8'),
-    );
-    const role = payload?.role_user ?? payload?.role ?? '';
-    const roleId = Number(payload?.role_id ?? payload?.id_role ?? NaN);
-    if (isAdminRole(role) || roleId === 5) {
-      return {
-        ...currentUser,
-        role_user: 'admin',
-        role_id: Number.isFinite(roleId) ? roleId : 5,
-      };
-    }
-  } catch (_) {
-    // noop
-  }
-
-  return currentUser;
 }
 
 class ChatService {
@@ -61,12 +37,17 @@ class ChatService {
     if (!otherUser?.id_user) {
       try {
         otherUser = await userDirectoryService.resolveDirectoryContactById(token, otherUserId);
-      } catch (_) {
-        // noop
+      } catch (err) {
+        console.warn(
+          `[chat/conversations] resolveDirectoryContactById fallo para "${otherUserId}": ${err?.message}`,
+        );
       }
     }
 
     if (!otherUser?.id_user) {
+      console.warn(
+        `[chat/conversations] destino no encontrado other="${otherUserId}" actor="${actor.id_user}" role="${actor.role_user}" contacts=${(allowedContacts || []).length}`,
+      );
       const error = new Error('Usuario destino no encontrado');
       error.status = 404;
       throw error;

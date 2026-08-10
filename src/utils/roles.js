@@ -15,6 +15,7 @@
  */
 function toRoleGroup(role) {
   const normalized = normalizeRole(role);
+  // Admin se evalúa aparte con isAdminActor; aquí solo agrupa peers de chat.
   if (normalized.includes('monitor')) return 'monitor';
   if (normalized.includes('admin')) return 'monitor';
   if (normalized.includes('model') || normalized.includes('modal')) return 'model';
@@ -48,10 +49,50 @@ function canChatBetween(roleA, roleB) {
   return (a === 'model' && b === 'monitor') || (a === 'monitor' && b === 'model');
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Completa role_user/role_id Admin desde JWT (permissions a veces no trae el rol). */
+function enrichAdminFromJwt(token, currentUser) {
+  const user = currentUser && typeof currentUser === 'object' ? currentUser : { role_user: currentUser };
+  if (isAdminActor(user)) {
+    return {
+      ...user,
+      role_user: isAdminRole(user.role_user) ? user.role_user : 'admin',
+    };
+  }
+
+  const payload = decodeJwtPayload(token);
+  if (payload) {
+    const role = payload?.role_user ?? payload?.role ?? '';
+    const roleId = Number(payload?.role_id ?? payload?.id_role ?? NaN);
+    if (isAdminRole(role) || roleId === 5) {
+      return {
+        ...user,
+        role_user: 'admin',
+        role_id: Number.isFinite(roleId) ? roleId : 5,
+      };
+    }
+  }
+
+  return user;
+}
+
 module.exports = {
   normalizeRole,
   toRoleGroup,
   isAdminRole,
   isAdminActor,
   canChatBetween,
+  decodeJwtPayload,
+  enrichAdminFromJwt,
 };

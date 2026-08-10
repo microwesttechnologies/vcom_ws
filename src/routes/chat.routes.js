@@ -2,6 +2,7 @@
 const authMiddleware = require('../middleware/auth.middleware');
 const chatService = require('../services/chat.service');
 const userDirectoryService = require('../services/userDirectory.service');
+const { enrichAdminFromJwt } = require('../utils/roles');
 
 function mapConversationForUser(conversationRow, currentUserId) {
   const participantA = String(conversationRow.participant_a);
@@ -37,11 +38,12 @@ function createChatRouter({ wsGateway }) {
 
   router.get('/contacts', async (req, res, next) => {
     try {
+      const actor = enrichAdminFromJwt(req.auth.token, req.auth.user);
       const contacts = await userDirectoryService.getAllowedContacts(
         req.auth.token,
-        req.auth.user.role_user,
-        req.auth.user.id_user,
-        req.auth.user,
+        actor.role_user,
+        actor.id_user,
+        actor,
       );
       res.json({ success: true, data: contacts });
     } catch (error) {

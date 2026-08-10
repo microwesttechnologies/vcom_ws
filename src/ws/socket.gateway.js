@@ -3,6 +3,7 @@ const url = require('url');
 const userDirectoryService = require('../services/userDirectory.service');
 const chatService = require('../services/chat.service');
 const fcmService = require('../services/fcm.service');
+const { enrichAdminFromJwt } = require('../utils/roles');
 
 function safeSend(ws, payload) {
   if (ws.readyState !== ws.OPEN) return;
@@ -31,7 +32,8 @@ class SocketGateway {
         return;
       }
 
-      const user = await userDirectoryService.getCurrentUser(token);
+      const resolved = await userDirectoryService.getCurrentUser(token);
+      const user = enrichAdminFromJwt(token, resolved);
       if (!user?.id_user) {
         safeSend(ws, { event: 'error', data: { code: 'AUTH_INVALID', message: 'token invalido' } });
         ws.close();
@@ -385,11 +387,12 @@ class SocketGateway {
     if (!state?.token || !state?.user?.id_user) return;
 
     try {
+      const actor = enrichAdminFromJwt(state.token, state.user);
       const contacts = await userDirectoryService.getAllowedContacts(
         state.token,
-        state.user.role_user,
-        state.user.id_user,
-        state.user,
+        actor.role_user,
+        actor.id_user,
+        actor,
       );
 
       safeSend(ws, {

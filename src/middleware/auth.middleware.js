@@ -1,4 +1,5 @@
 ﻿const userDirectoryService = require('../services/userDirectory.service');
+const { enrichAdminFromJwt } = require('../utils/roles');
 
 function extractBearerToken(authHeader) {
   const value = String(authHeader || '').trim();
@@ -28,7 +29,7 @@ async function authMiddleware(req, res, next) {
 
     req.auth = {
       token,
-      user: currentUser,
+      user: enrichAdminFromJwt(token, currentUser),
     };
 
     return next();

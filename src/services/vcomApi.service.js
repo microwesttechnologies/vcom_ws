@@ -5,7 +5,8 @@ class VcomApiService {
   constructor() {
     this.client = axios.create({
       baseURL: vcomApiBaseUrl,
-      timeout: 15000,
+      // chat-directory puede traer fotos base64; 15s se queda corto desde la VPS.
+      timeout: 45000,
     });
   }
 

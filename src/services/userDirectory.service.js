@@ -136,17 +136,22 @@ function mapUser(raw) {
     raw.employee_name ??
     'Sin nombre';
 
+  // Preferir id_model / id_employee (contrato chat-directory / JWT)
+  // sobre un `id` genérico que a veces no es el peer del chat.
+  const canonicalId =
+    source.id_user ??
+    raw.id_user ??
+    raw.user_id ??
+    source.id_model ??
+    raw.id_model ??
+    source.id_employee ??
+    raw.id_employee ??
+    source.id ??
+    raw.id ??
+    '';
+
   return {
-    id_user: String(
-      source.id_user ??
-      source.id ??
-      raw.id_user ??
-      raw.user_id ??
-      raw.id_model ??
-      raw.id_employee ??
-      raw.id ??
-      '',
-    ),
+    id_user: String(canonicalId),
     name_user: String(resolvedName).trim() || 'Sin nombre',
     role_user: inferredRole,
     is_online: Boolean(source.is_online ?? raw.is_online),
@@ -191,25 +196,27 @@ async function getConversationParticipantFallback(currentUserId) {
 }
 
 async function getMonitorRoleIds(token) {
+  // Baseline fijo: Monitor=3, Admin=5. No depender solo de /roles
+  // (si el token solo ve "Admin", antes quedaba Set([5]) y se excluían monitores).
+  const ids = new Set([3, 5]);
+
   try {
     const rolesPayload = await vcomApiService.getRoles(token);
     const roles = unwrapCollection(rolesPayload);
-    const ids = new Set();
 
     for (const role of roles) {
       const name = String(role?.name_role ?? role?.role_name ?? role?.name ?? '')
         .trim()
         .toLowerCase();
-      // Admin opera como monitor en la app móvil.
       if (!name.includes('monitor') && !name.includes('admin')) continue;
       const id = toInt(role?.id_role ?? role?.id);
       if (id != null) ids.add(id);
     }
+  } catch (_) {
+    // noop: se mantiene el baseline 3 y 5
+  }
 
-    if (ids.size > 0) return ids;
-  } catch (_) {}
-
-  return new Set([3, 5]);
+  return ids;
 }
 
 function isMonitorLikeEmployee(emp, monitorRoleIds) {
@@ -333,24 +340,38 @@ class UserDirectoryService {
     const target = String(otherUserId || '').trim();
     if (!target) return null;
 
+    const rowMatchesTarget = (row) => {
+      const candidates = [
+        row?.id_user,
+        row?.user_id,
+        row?.id_model,
+        row?.id_employee,
+        row?.id,
+      ];
+      return candidates.some((value) => String(value ?? '').trim() === target);
+    };
+
     try {
       const models = await this.loadModelsDirectory(token);
-      const asModel = (Array.isArray(models) ? models : [])
-        .map(mapUser)
-        .find((user) => String(user.id_user) === target);
-      if (asModel?.id_user) {
-        return { ...asModel, role_user: 'modelo' };
+      const modelRow = (Array.isArray(models) ? models : []).find(rowMatchesTarget);
+      if (modelRow) {
+        const asModel = mapUser(modelRow);
+        return {
+          ...asModel,
+          id_user: String(asModel.id_user || modelRow.id_model || target),
+          role_user: 'modelo',
+        };
       }
-    } catch (_) {
-      // noop
+    } catch (err) {
+      console.warn(
+        `[chat/resolve] models directory fallo: ${err?.response?.status ?? err?.message}`,
+      );
     }
 
     try {
       const payload = await vcomApiService.getEmployeesChatDirectory(token);
       const all = unwrapCollection(payload);
-      const emp = (Array.isArray(all) ? all : []).find(
-        (row) => String(row?.id_employee ?? row?.id_user ?? row?.id ?? '') === target,
-      );
+      const emp = (Array.isArray(all) ? all : []).find(rowMatchesTarget);
       if (emp) {
         const mapped = mapUser(emp);
         const roleId = toInt(emp.id_role ?? emp.role_id);
@@ -365,20 +386,27 @@ class UserDirectoryService {
           role_user: isMonitor ? 'monitor' : (mapped.role_user || 'monitor'),
         };
       }
-    } catch (_) {
-      // noop
+    } catch (err) {
+      console.warn(
+        `[chat/resolve] employees directory fallo: ${err?.response?.status ?? err?.message}`,
+      );
     }
 
     try {
       const monitors = await this.loadMonitorsDirectory(token);
-      const asMonitor = (Array.isArray(monitors) ? monitors : [])
-        .map(mapUser)
-        .find((user) => String(user.id_user) === target);
-      if (asMonitor?.id_user) {
-        return { ...asMonitor, role_user: 'monitor' };
+      const monitorRow = (Array.isArray(monitors) ? monitors : []).find(rowMatchesTarget);
+      if (monitorRow) {
+        const asMonitor = mapUser(monitorRow);
+        return {
+          ...asMonitor,
+          id_user: String(asMonitor.id_user || monitorRow.id_employee || target),
+          role_user: 'monitor',
+        };
       }
-    } catch (_) {
-      // noop
+    } catch (err) {
+      console.warn(
+        `[chat/resolve] monitors directory fallo: ${err?.response?.status ?? err?.message}`,
+      );
     }
 
     return null;
@@ -422,7 +450,11 @@ class UserDirectoryService {
 
   async getAllowedContacts(token, currentUserRole, currentUserId, currentUser = null) {
     const currentGroup = toRoleGroup(currentUserRole);
-    const adminUser = isAdminActor(currentUser || currentUserRole, currentUser?.role_id);
+    // Admin nunca debe caer en el path "solo modelos" (toRoleGroup(admin)=monitor).
+    const adminUser =
+      isAdminActor(currentUser || currentUserRole, currentUser?.role_id) ||
+      isAdminRole(currentUserRole) ||
+      Number(currentUser?.role_id) === 5;
 
     if (MOCK_ENABLED && String(currentUserId).startsWith('mock-')) {
       const mockAllowed = MOCK_USERS
@@ -447,7 +479,11 @@ class UserDirectoryService {
           this.loadModelsDirectory(token),
           this.loadMonitorsDirectory(token),
         ]);
-        users = [...models, ...monitors];
+        // Etiquetar rol explícitamente: evita que un `id` ambiguo mezcle pestañas.
+        users = [
+          ...(Array.isArray(models) ? models : []).map((row) => ({ ...row, role_user: 'modelo' })),
+          ...(Array.isArray(monitors) ? monitors : []).map((row) => ({ ...row, role_user: 'monitor' })),
+        ];
         usersFromRoleEndpoints = true;
         console.log(`[chat/contacts] admin => ${models.length} modelos + ${monitors.length} monitores`);
       } else if (currentGroup === 'monitor') {
