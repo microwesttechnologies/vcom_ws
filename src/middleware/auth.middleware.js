@@ -1,9 +1,21 @@
 ﻿const userDirectoryService = require('../services/userDirectory.service');
 
+function extractBearerToken(authHeader) {
+  const value = String(authHeader || '').trim();
+  if (!value) return null;
+
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  if (match?.[1]) return match[1].trim();
+
+  // JWT crudo (sin esquema)
+  if (value.split('.').length === 3) return value;
+
+  return null;
+}
+
 async function authMiddleware(req, res, next) {
   try {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const token = extractBearerToken(req.headers.authorization);
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Token requerido' });

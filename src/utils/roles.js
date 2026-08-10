@@ -21,7 +21,17 @@ function toRoleGroup(role) {
   return 'other';
 }
 
+function isAdminRole(role) {
+  return normalizeRole(role).includes('admin');
+}
+
 function canChatBetween(roleA, roleB) {
+  // Admin (panel web) puede chatear con modelos y monitores.
+  if (isAdminRole(roleA) || isAdminRole(roleB)) {
+    const other = isAdminRole(roleA) ? toRoleGroup(roleB) : toRoleGroup(roleA);
+    return other === 'model' || other === 'monitor';
+  }
+
   const a = toRoleGroup(roleA);
   const b = toRoleGroup(roleB);
   return (a === 'model' && b === 'monitor') || (a === 'monitor' && b === 'model');
@@ -30,5 +40,6 @@ function canChatBetween(roleA, roleB) {
 module.exports = {
   normalizeRole,
   toRoleGroup,
+  isAdminRole,
   canChatBetween,
 };

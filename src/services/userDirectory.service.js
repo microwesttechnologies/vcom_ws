@@ -1,6 +1,6 @@
 ﻿const vcomApiService = require('./vcomApi.service');
 const pool = require('../db/pool');
-const { toRoleGroup } = require('../utils/roles');
+const { toRoleGroup, isAdminRole } = require('../utils/roles');
 
 const MOCK_ENABLED = String(process.env.CHAT_ENABLE_MOCK_USERS || 'false').toLowerCase() === 'true';
 const MOCK_USERS = [
@@ -298,14 +298,52 @@ class UserDirectoryService {
     return mapUser(unwrapEntity(data));
   }
 
+  async loadModelsDirectory(token) {
+    try {
+      const payload = await vcomApiService.getModelsChatDirectory(token);
+      const users = unwrapCollection(payload);
+      console.log(`[chat/contacts] models/chat-directory => ${users.length} registros`);
+      return users;
+    } catch (dirErr) {
+      console.warn(`[chat/contacts] chat-directory fallo (${dirErr?.response?.status ?? dirErr?.message}), usando /models`);
+      const modelsPayload = await vcomApiService.getModels(token);
+      const users = unwrapCollection(modelsPayload);
+      console.log(`[chat/contacts] /models => ${users.length} registros`);
+      return users;
+    }
+  }
+
+  async loadMonitorsDirectory(token) {
+    try {
+      const payload = await vcomApiService.getEmployeesChatDirectory(token);
+      const all = unwrapCollection(payload);
+      const monitorRoleIds = await getMonitorRoleIds(token);
+      const users = all.filter((emp) => isMonitorLikeEmployee(emp, monitorRoleIds));
+      console.log(`[chat/contacts] employees/chat-directory => ${all.length} total, ${users.length} monitores`);
+      return users;
+    } catch (dirErr) {
+      console.warn(`[chat/contacts] chat-directory fallo (${dirErr?.response?.status ?? dirErr?.message}), usando /employees`);
+      const employeesPayload = await vcomApiService.getEmployees(token);
+      const employees = unwrapCollection(employeesPayload);
+      const monitorRoleIds = await getMonitorRoleIds(token);
+      const users = (Array.isArray(employees) ? employees : []).filter((employee) =>
+        isMonitorLikeEmployee(employee, monitorRoleIds),
+      );
+      console.log(`[chat/contacts] /employees => ${employees.length} total, ${users.length} monitores`);
+      return users;
+    }
+  }
+
   async getAllowedContacts(token, currentUserRole, currentUserId) {
     const currentGroup = toRoleGroup(currentUserRole);
+    const adminUser = isAdminRole(currentUserRole);
 
     if (MOCK_ENABLED && String(currentUserId).startsWith('mock-')) {
       const mockAllowed = MOCK_USERS
         .filter((item) => item.id_user !== String(currentUserId))
         .filter((item) => {
           const group = toRoleGroup(item.role_user);
+          if (adminUser) return group === 'model' || group === 'monitor';
           return (currentGroup === 'model' && group === 'monitor') ||
             (currentGroup === 'monitor' && group === 'model');
         });
@@ -315,40 +353,22 @@ class UserDirectoryService {
     let users = [];
     let usersFromRoleEndpoints = false;
 
-    console.log(`[chat/contacts] role="${currentUserRole}" group="${currentGroup}" userId="${currentUserId}"`);
+    console.log(`[chat/contacts] role="${currentUserRole}" group="${currentGroup}" userId="${currentUserId}" admin=${adminUser}`);
 
     try {
-      if (currentGroup === 'monitor') {
-        // Preferir el endpoint de directorio (sin restricciones de politica).
-        // Fallback al endpoint completo de modelos.
-        try {
-          const payload = await vcomApiService.getModelsChatDirectory(token);
-          users = unwrapCollection(payload);
-          console.log(`[chat/contacts] models/chat-directory => ${users.length} registros`);
-        } catch (dirErr) {
-          console.warn(`[chat/contacts] chat-directory fallo (${dirErr?.response?.status ?? dirErr?.message}), usando /models`);
-          const modelsPayload = await vcomApiService.getModels(token);
-          users = unwrapCollection(modelsPayload);
-          console.log(`[chat/contacts] /models => ${users.length} registros`);
-        }
+      if (adminUser) {
+        const [models, monitors] = await Promise.all([
+          this.loadModelsDirectory(token),
+          this.loadMonitorsDirectory(token),
+        ]);
+        users = [...models, ...monitors];
+        usersFromRoleEndpoints = true;
+        console.log(`[chat/contacts] admin => ${models.length} modelos + ${monitors.length} monitores`);
+      } else if (currentGroup === 'monitor') {
+        users = await this.loadModelsDirectory(token);
         usersFromRoleEndpoints = true;
       } else if (currentGroup === 'model') {
-        try {
-          const payload = await vcomApiService.getEmployeesChatDirectory(token);
-          const all = unwrapCollection(payload);
-          const monitorRoleIds = await getMonitorRoleIds(token);
-          users = all.filter((emp) => isMonitorLikeEmployee(emp, monitorRoleIds));
-          console.log(`[chat/contacts] employees/chat-directory => ${all.length} total, ${users.length} monitores`);
-        } catch (dirErr) {
-          console.warn(`[chat/contacts] chat-directory fallo (${dirErr?.response?.status ?? dirErr?.message}), usando /employees`);
-          const employeesPayload = await vcomApiService.getEmployees(token);
-          const employees = unwrapCollection(employeesPayload);
-          const monitorRoleIds = await getMonitorRoleIds(token);
-          users = (Array.isArray(employees) ? employees : []).filter((employee) =>
-            isMonitorLikeEmployee(employee, monitorRoleIds),
-          );
-          console.log(`[chat/contacts] /employees => ${employees.length} total, ${users.length} monitores`);
-        }
+        users = await this.loadMonitorsDirectory(token);
         usersFromRoleEndpoints = true;
       } else {
         console.warn(`[chat/contacts] rol "${currentUserRole}" no reconocido como modelo ni monitor; cargando todos los usuarios`);
@@ -371,10 +391,11 @@ class UserDirectoryService {
       .map(mapUser)
       .filter((user) => user.id_user && user.id_user !== String(currentUserId))
       .filter((user) => {
-        if (usersFromRoleEndpoints && (currentGroup === 'model' || currentGroup === 'monitor')) {
+        if (usersFromRoleEndpoints && (adminUser || currentGroup === 'model' || currentGroup === 'monitor')) {
           return true;
         }
         const group = toRoleGroup(user.role_user);
+        if (adminUser) return group === 'model' || group === 'monitor';
         return (currentGroup === 'model' && group === 'monitor') ||
           (currentGroup === 'monitor' && group === 'model');
       });
