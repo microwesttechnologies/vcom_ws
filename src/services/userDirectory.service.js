@@ -326,22 +326,62 @@ class UserDirectoryService {
   }
 
   /**
-   * Busca un contacto por id en directorios de modelos + monitores (panel admin).
+   * Busca un contacto por id en directorios de modelos + empleados (panel admin).
+   * Usa id_model / id_employee como id_user (mismo contrato que chat-directory).
    */
   async resolveDirectoryContactById(token, otherUserId) {
     const target = String(otherUserId || '').trim();
     if (!target) return null;
 
-    const [models, monitors] = await Promise.all([
-      this.loadModelsDirectory(token).catch(() => []),
-      this.loadMonitorsDirectory(token).catch(() => []),
-    ]);
+    try {
+      const models = await this.loadModelsDirectory(token);
+      const asModel = (Array.isArray(models) ? models : [])
+        .map(mapUser)
+        .find((user) => String(user.id_user) === target);
+      if (asModel?.id_user) {
+        return { ...asModel, role_user: 'modelo' };
+      }
+    } catch (_) {
+      // noop
+    }
 
-    const mapped = [...models, ...monitors]
-      .map(mapUser)
-      .filter((user) => user.id_user);
+    try {
+      const payload = await vcomApiService.getEmployeesChatDirectory(token);
+      const all = unwrapCollection(payload);
+      const emp = (Array.isArray(all) ? all : []).find(
+        (row) => String(row?.id_employee ?? row?.id_user ?? row?.id ?? '') === target,
+      );
+      if (emp) {
+        const mapped = mapUser(emp);
+        const roleId = toInt(emp.id_role ?? emp.role_id);
+        const monitorRoleIds = await getMonitorRoleIds(token);
+        const isMonitor =
+          roleId === 3 ||
+          isMonitorLikeEmployee(emp, monitorRoleIds) ||
+          roleId === 5;
+        return {
+          ...mapped,
+          id_user: String(mapped.id_user || emp.id_employee || target),
+          role_user: isMonitor ? 'monitor' : (mapped.role_user || 'monitor'),
+        };
+      }
+    } catch (_) {
+      // noop
+    }
 
-    return mapped.find((user) => String(user.id_user) === target) || null;
+    try {
+      const monitors = await this.loadMonitorsDirectory(token);
+      const asMonitor = (Array.isArray(monitors) ? monitors : [])
+        .map(mapUser)
+        .find((user) => String(user.id_user) === target);
+      if (asMonitor?.id_user) {
+        return { ...asMonitor, role_user: 'monitor' };
+      }
+    } catch (_) {
+      // noop
+    }
+
+    return null;
   }
 
   async loadModelsDirectory(token) {
