@@ -1,6 +1,6 @@
 ﻿const pool = require('../db/pool');
 const userDirectoryService = require('./userDirectory.service');
-const { canChatBetween } = require('../utils/roles');
+const { canChatBetween, isAdminRole } = require('../utils/roles');
 
 function canonicalPair(a, b) {
   const aStr = String(a);
@@ -21,9 +21,19 @@ class ChatService {
       currentUser.role_user,
       currentUser.id_user,
     );
-    const otherUser = (allowedContacts || []).find(
+    let otherUser = (allowedContacts || []).find(
       (item) => String(item.id_user) === String(otherUserId),
     ) || null;
+
+    // Admin (panel web): si el destino no vino en el directorio filtrado, intentar resolverlo.
+    if (!otherUser?.id_user && isAdminRole(currentUser.role_user)) {
+      try {
+        const resolved = await userDirectoryService.getUserById(token, otherUserId);
+        if (resolved?.id_user) otherUser = resolved;
+      } catch (_) {
+        // noop
+      }
+    }
 
     if (!otherUser?.id_user) {
       const error = new Error('Usuario destino no encontrado');

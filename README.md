@@ -4,8 +4,9 @@ Backend de chat en **Node.js + WebSocket + PostgreSQL** para VCOM.
 
 ## Reglas de negocio implementadas
 
-- Solo se permite conversar entre roles:
+- Conversación permitida:
   - `modelo` (o `modal`) <-> `monitor`
+  - `admin` <-> `modelo` y `admin` <-> `monitor` (panel web VCOM)
 - No se permite conversación con uno mismo.
 - Estados manejados en tiempo real:
   - `connected`
