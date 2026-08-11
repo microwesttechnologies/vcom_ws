@@ -156,6 +156,16 @@ function mapUser(raw) {
     role_user: inferredRole,
     is_online: Boolean(source.is_online ?? raw.is_online),
     last_seen: source.last_seen ?? raw.last_seen ?? null,
+    // Conservar ids de directorio para matching admin → monitor/modelo.
+    id_employee:
+      source.id_employee != null || raw.id_employee != null
+        ? String(source.id_employee ?? raw.id_employee)
+        : null,
+    id_model:
+      source.id_model != null || raw.id_model != null
+        ? String(source.id_model ?? raw.id_model)
+        : null,
+    role_id: toInt(source.id_role ?? source.role_id ?? raw.id_role ?? raw.role_id),
   };
 }
 
@@ -341,14 +351,36 @@ class UserDirectoryService {
     if (!target) return null;
 
     const rowMatchesTarget = (row) => {
+      if (!row || typeof row !== 'object') return false;
       const candidates = [
-        row?.id_user,
-        row?.user_id,
-        row?.id_model,
-        row?.id_employee,
-        row?.id,
+        row.id_user,
+        row.user_id,
+        row.id_model,
+        row.id_employee,
+        row.id,
+        row?.user?.id_user,
+        row?.employee?.id_employee,
+        row?.model?.id_model,
       ];
-      return candidates.some((value) => String(value ?? '').trim() === target);
+      return candidates.some(
+        (value) => String(value ?? '').trim().toLowerCase() === target.toLowerCase(),
+      );
+    };
+
+    const asMonitorContact = async (row) => {
+      const mapped = mapUser(row);
+      const roleId = toInt(row.id_role ?? row.role_id ?? mapped.role_id);
+      const monitorRoleIds = await getMonitorRoleIds(token);
+      const isMonitor =
+        roleId === 3 ||
+        roleId === 5 ||
+        isMonitorLikeEmployee(row, monitorRoleIds) ||
+        toRoleGroup(mapped.role_user) === 'monitor';
+      return {
+        ...mapped,
+        id_user: String(mapped.id_user || row.id_employee || target),
+        role_user: isMonitor ? 'monitor' : (mapped.role_user || 'monitor'),
+      };
     };
 
     try {
@@ -368,40 +400,37 @@ class UserDirectoryService {
       );
     }
 
+    // Empleados: chat-directory primero; si falla o no hay match, /employees.
+    const employeeSources = [];
     try {
       const payload = await vcomApiService.getEmployeesChatDirectory(token);
-      const all = unwrapCollection(payload);
-      const emp = (Array.isArray(all) ? all : []).find(rowMatchesTarget);
-      if (emp) {
-        const mapped = mapUser(emp);
-        const roleId = toInt(emp.id_role ?? emp.role_id);
-        const monitorRoleIds = await getMonitorRoleIds(token);
-        const isMonitor =
-          roleId === 3 ||
-          isMonitorLikeEmployee(emp, monitorRoleIds) ||
-          roleId === 5;
-        return {
-          ...mapped,
-          id_user: String(mapped.id_user || emp.id_employee || target),
-          role_user: isMonitor ? 'monitor' : (mapped.role_user || 'monitor'),
-        };
-      }
+      employeeSources.push(unwrapCollection(payload));
     } catch (err) {
       console.warn(
-        `[chat/resolve] employees directory fallo: ${err?.response?.status ?? err?.message}`,
+        `[chat/resolve] employees chat-directory fallo: ${err?.response?.status ?? err?.message}`,
       );
+    }
+    try {
+      const payload = await vcomApiService.getEmployees(token);
+      employeeSources.push(unwrapCollection(payload));
+    } catch (err) {
+      console.warn(
+        `[chat/resolve] employees fallo: ${err?.response?.status ?? err?.message}`,
+      );
+    }
+
+    for (const list of employeeSources) {
+      const emp = (Array.isArray(list) ? list : []).find(rowMatchesTarget);
+      if (emp) {
+        return asMonitorContact(emp);
+      }
     }
 
     try {
       const monitors = await this.loadMonitorsDirectory(token);
       const monitorRow = (Array.isArray(monitors) ? monitors : []).find(rowMatchesTarget);
       if (monitorRow) {
-        const asMonitor = mapUser(monitorRow);
-        return {
-          ...asMonitor,
-          id_user: String(asMonitor.id_user || monitorRow.id_employee || target),
-          role_user: 'monitor',
-        };
+        return asMonitorContact(monitorRow);
       }
     } catch (err) {
       console.warn(
@@ -449,12 +478,15 @@ class UserDirectoryService {
   }
 
   async getAllowedContacts(token, currentUserRole, currentUserId, currentUser = null) {
-    const currentGroup = toRoleGroup(currentUserRole);
-    // Admin nunca debe caer en el path "solo modelos" (toRoleGroup(admin)=monitor).
+    // currentUser ya viene enrichAdminFromJwt desde auth/ensureConversation.
+    const actor = currentUser && typeof currentUser === 'object' ? currentUser : { role_user: currentUserRole };
+    const currentGroup = toRoleGroup(actor.role_user || currentUserRole);
     const adminUser =
-      isAdminActor(currentUser || currentUserRole, currentUser?.role_id) ||
+      isAdminActor(actor) ||
+      isAdminActor(currentUserRole, actor?.role_id) ||
       isAdminRole(currentUserRole) ||
-      Number(currentUser?.role_id) === 5;
+      isAdminRole(actor.role_user) ||
+      Number(actor?.role_id) === 5;
 
     if (MOCK_ENABLED && String(currentUserId).startsWith('mock-')) {
       const mockAllowed = MOCK_USERS
@@ -471,7 +503,7 @@ class UserDirectoryService {
     let users = [];
     let usersFromRoleEndpoints = false;
 
-    console.log(`[chat/contacts] role="${currentUserRole}" group="${currentGroup}" userId="${currentUserId}" admin=${adminUser}`);
+    console.log(`[chat/contacts] role="${actor.role_user || currentUserRole}" group="${currentGroup}" userId="${currentUserId}" admin=${adminUser} role_id=${actor?.role_id}`);
 
     try {
       if (adminUser) {

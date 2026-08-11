@@ -13,6 +13,22 @@ function canonicalPair(a, b) {
   return aStr < bStr ? [aStr, bStr] : [bStr, aStr];
 }
 
+function idsEqual(a, b) {
+  return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+}
+
+function contactMatchesId(contact, targetId) {
+  if (!contact || !targetId) return false;
+  const candidates = [
+    contact.id_user,
+    contact.id_employee,
+    contact.id_model,
+    contact.user_id,
+    contact.id,
+  ];
+  return candidates.some((value) => idsEqual(value, targetId));
+}
+
 class ChatService {
   async ensureConversation({ token, currentUser, otherUserId }) {
     if (String(currentUser.id_user) === String(otherUserId)) {
@@ -22,6 +38,7 @@ class ChatService {
     }
 
     const actor = enrichAdminFromJwt(token, currentUser);
+    const targetId = String(otherUserId || '').trim();
 
     const allowedContacts = await userDirectoryService.getAllowedContacts(
       token,
@@ -29,24 +46,22 @@ class ChatService {
       actor.id_user,
       actor,
     );
-    let otherUser = (allowedContacts || []).find(
-      (item) => String(item.id_user) === String(otherUserId),
-    ) || null;
+    let otherUser = (allowedContacts || []).find((item) => contactMatchesId(item, targetId)) || null;
 
-    // Panel Admin: id_employee / id_model vienen de chat-directory, no de /contacts.
+    // Panel Admin (y fallbacks): id_employee / id_model de chat-directory.
     if (!otherUser?.id_user) {
       try {
-        otherUser = await userDirectoryService.resolveDirectoryContactById(token, otherUserId);
+        otherUser = await userDirectoryService.resolveDirectoryContactById(token, targetId);
       } catch (err) {
         console.warn(
-          `[chat/conversations] resolveDirectoryContactById fallo para "${otherUserId}": ${err?.message}`,
+          `[chat/conversations] resolveDirectoryContactById fallo para "${targetId}": ${err?.message}`,
         );
       }
     }
 
     if (!otherUser?.id_user) {
       console.warn(
-        `[chat/conversations] destino no encontrado other="${otherUserId}" actor="${actor.id_user}" role="${actor.role_user}" contacts=${(allowedContacts || []).length}`,
+        `[chat/conversations] destino no encontrado other="${targetId}" actor="${actor.id_user}" role="${actor.role_user}" role_id="${actor.role_id}" admin=${isAdminActor(actor)} contacts=${(allowedContacts || []).length}`,
       );
       const error = new Error('Usuario destino no encontrado');
       error.status = 404;
