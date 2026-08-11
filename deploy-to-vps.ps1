@@ -63,7 +63,7 @@ if (Test-Path $tempRoot) {
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 
 # Normalizar scripts bash a LF antes de empaquetar
-foreach ($bashFile in @("remote-deploy.sh", "fix-nginx-wschat.sh")) {
+foreach ($bashFile in @("remote-deploy.sh", "fix-traefik-wschat.sh")) {
     $full = Join-Path $projectRoot $bashFile
     if (Test-Path $full) {
         $text = [System.IO.File]::ReadAllText($full) -replace "`r`n", "`n" -replace "`r", "`n"
@@ -83,7 +83,7 @@ $includePaths = @(
     "README.md",
     "compose.vps.yml",
     "firebase-service-account.json",
-    "fix-nginx-wschat.sh",
+    "fix-traefik-wschat.sh",
     "remote-deploy.sh"
 ) | Where-Object { Test-Path (Join-Path $projectRoot $_) }
 
@@ -130,11 +130,11 @@ Invoke-ExternalChecked -FilePath "ssh" -Arguments ($sshArgs + @("${UserName}@${H
 
 if ($RestartCompose) {
     Write-Host "Ejecutando remote-deploy.sh en la VPS"
-    $runScript = "set -e; cd '$RemoteDir'; sed -i 's/\r$//' remote-deploy.sh fix-nginx-wschat.sh; chmod +x remote-deploy.sh fix-nginx-wschat.sh; bash remote-deploy.sh '$RemoteDir'"
+    $runScript = "set -e; cd '$RemoteDir'; sed -i 's/\r$//' remote-deploy.sh fix-traefik-wschat.sh; chmod +x remote-deploy.sh fix-traefik-wschat.sh; bash remote-deploy.sh '$RemoteDir'"
     $runScript = $runScript -replace "`r`n", "`n" -replace "`r", "`n"
     Invoke-ExternalChecked -FilePath "ssh" -Arguments ($sshArgs + @("${UserName}@${HostName}", $runScript))
     Write-Host "Proceso completado."
-    Write-Host "Swagger: https://wschat.vcommunity.cloud/docs"
+    Write-Host "Swagger: https://wschat.vcommunity.cloud/docs/"
     Write-Host "Health debe incluir buildId: https://wschat.vcommunity.cloud/health"
 } else {
     Write-Host "Proceso completado (sin rebuild)."

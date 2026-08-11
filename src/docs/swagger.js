@@ -33,8 +33,11 @@ function mountSwagger(app) {
 
   app.use('/docs', swaggerUi.serve, ui);
   app.use('/api-docs', swaggerUi.serve, ui);
+  // Evitar confusion del 301: /docs -> /docs/
+  app.get('/docs', (_req, res) => res.redirect(301, '/docs/'));
+  app.get('/api-docs', (_req, res) => res.redirect(301, '/api-docs/'));
 
-  console.log('[swagger] UI en /docs y /api-docs | JSON en /docs.json y /api-docs.json');
+  console.log('[swagger] UI en /docs/ y /api-docs/ | JSON en /docs.json');
 }
 
 module.exports = { mountSwagger };

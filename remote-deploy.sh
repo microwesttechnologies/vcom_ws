@@ -28,21 +28,18 @@ echo CONTAINER_FILES_OK
 echo "=== health HOST :8081 ==="
 curl -sS http://127.0.0.1:8081/health
 echo
-curl -sS -o /dev/null -w "docs :8081 HTTP:%{http_code}\n" http://127.0.0.1:8081/docs
+curl -sS -o /dev/null -w "docs/ :8081 HTTP:%{http_code}\n" http://127.0.0.1:8081/docs/
 
-echo "=== puertos ==="
-ss -lntp | grep -E '8081|80|443|3000|4000|5000|8080' || true
+echo "=== docker ps ==="
+docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
 
-echo "=== nginx grep ==="
-grep -RInE "wschat|8081|proxy_pass" /etc/nginx 2>/dev/null | head -n 80 || true
+echo "=== FIX TRAEFIK (no nginx) ==="
+chmod +x fix-traefik-wschat.sh
+bash fix-traefik-wschat.sh
 
-echo "=== FIX NGINX ==="
-chmod +x fix-nginx-wschat.sh
-bash fix-nginx-wschat.sh
-
-echo "=== health via nginx Host header ==="
-curl -sS -H "Host: wschat.vcommunity.cloud" http://127.0.0.1/health || true
+echo "=== verificacion publica local (si hay curl a dominio) ==="
+curl -sS https://wschat.vcommunity.cloud/health || true
 echo
-curl -sS -o /dev/null -w "docs via nginx HTTP:%{http_code}\n" -H "Host: wschat.vcommunity.cloud" http://127.0.0.1/docs || true
+curl -sS -o /dev/null -w "docs/ publico HTTP:%{http_code}\n" https://wschat.vcommunity.cloud/docs/ || true
 
 echo "DEPLOY_REMOTE_OK"
