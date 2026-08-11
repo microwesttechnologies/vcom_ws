@@ -7,6 +7,7 @@ const pool = require('./db/pool');
 const createChatRouter = require('./routes/chat.routes');
 const createChatMediaRouter = require('./routes/chatMedia.routes');
 const createHubProxyRouter = require('./routes/hubProxy.routes');
+const { mountSwagger } = require('./docs/swagger');
 
 function createApp({ wsGateway }) {
   const app = express();
@@ -227,6 +228,11 @@ function createApp({ wsGateway }) {
         <div class="status" style="margin-top:10px;">DB: <strong id="dbState">verificando...</strong></div>
       </div>
       <div class="panel">
+        <div class="label">Swagger</div>
+        <code><a href="/docs" style="color:var(--accent);">GET ${req.protocol}://${req.get('host')}/docs</a></code>
+        <div class="status" style="margin-top:10px;color:var(--muted);">OpenAPI: <a href="/docs.json" style="color:var(--accent);">/docs.json</a> · alias <a href="/api-docs" style="color:var(--accent);">/api-docs</a></div>
+      </div>
+      <div class="panel">
         <div class="label">WebSocket</div>
         <code>${wsUrl}</code>
       </div>
@@ -430,7 +436,13 @@ function createApp({ wsGateway }) {
   });
 
   app.get('/health', (_req, res) => {
-    res.json({ success: true, message: 'API chat running' });
+    res.json({
+      success: true,
+      message: 'API chat running',
+      buildId: 'swagger-docs-2026-08-11',
+      docs: '/docs',
+      docsJson: '/docs.json',
+    });
   });
 
   app.get('/health/db', async (_req, res) => {
@@ -445,6 +457,8 @@ function createApp({ wsGateway }) {
       });
     }
   });
+
+  mountSwagger(app);
 
   app.use('/api/hub', createHubProxyRouter());
   app.use('/api/chat', createChatRouter({ wsGateway }));

@@ -75,7 +75,8 @@ $includePaths = @(
     ".env.example",
     "README.md",
     "compose.vps.yml",
-    "firebase-service-account.json"
+    "firebase-service-account.json",
+    "fix-nginx-wschat.sh"
 ) | Where-Object {
     Test-Path (Join-Path $projectRoot $_)
 }
@@ -89,7 +90,20 @@ $includePaths | ForEach-Object { Write-Host " - $_" }
 
 Push-Location $projectRoot
 try {
+    # Asegurar que src local tiene swagger antes de empaquetar
+    $swaggerLocal = Join-Path $projectRoot "src\docs\swagger.js"
+    if (-not (Test-Path $swaggerLocal)) {
+        throw "Falta archivo local: src/docs/swagger.js"
+    }
     Invoke-ExternalChecked -FilePath "tar" -Arguments (@("-czf", $archivePath) + $includePaths)
+    # Verificar contenido del tar
+    $tarList = & tar -tzf $archivePath
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo listar el tar" }
+    $hasSwagger = $tarList | Where-Object { $_ -match 'src/docs/swagger\.js$|src\\docs\\swagger\.js$' }
+    $hasApp = $tarList | Where-Object { $_ -match 'src/app\.js$|src\\app\.js$' }
+    if (-not $hasSwagger) { throw "El tar no contiene src/docs/swagger.js. Contenido parcial:`n$($tarList | Select-Object -First 40 | Out-String)" }
+    if (-not $hasApp) { throw "El tar no contiene src/app.js" }
+    Write-Host "Tar OK: incluye src/app.js y src/docs/swagger.js ($($tarList.Count) entradas)"
 }
 finally {
     Pop-Location
@@ -113,7 +127,38 @@ if ($RestartCompose) {
     $remoteScript = $remoteScript.TrimEnd() + "`n"
     $remoteScript += @'
 cd '__REMOTE_DIR__'
-docker compose -f compose.vps.yml up -d --build --force-recreate api-vcom-chat
+echo "=== contenido desplegado ==="
+ls -la
+rm -f compose.override.yml
+echo "=== src ==="
+du -sh src
+find src -type f | wc -l
+test -f src/docs/swagger.js || { echo "ERROR: falta src/docs/swagger.js"; find src -maxdepth 2 -type d; exit 1; }
+grep -q mountSwagger src/app.js || { echo "ERROR: src/app.js sin mountSwagger"; exit 1; }
+grep -q buildId src/app.js || { echo "ERROR: src/app.js sin buildId"; exit 1; }
+docker compose -f compose.vps.yml build --no-cache api-vcom-chat
+docker compose -f compose.vps.yml up -d --force-recreate api-vcom-chat
+sleep 3
+echo "=== dentro del contenedor /app ==="
+docker exec api-vcom-chat ls -la /app
+echo "=== health INSIDE container (8081) ==="
+docker exec api-vcom-chat node -e "require('http').get('http://127.0.0.1:8081/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>console.log(d))}).on('error',e=>{console.error(e);process.exit(1)})"
+echo "=== health HOST localhost:8081 ==="
+curl -sS http://127.0.0.1:8081/health || true
+echo
+echo "=== docs HOST localhost:8081 ==="
+curl -sS -o /dev/null -w "HTTP:%{http_code}\n" http://127.0.0.1:8081/docs || true
+echo "=== puertos en escucha ==="
+ss -lntp | grep -E '8081|80|443|3000|4000|5000|8080' || netstat -lntp | grep -E '8081|80|443|3000|4000|5000|8080' || true
+echo "=== nginx wschat ==="
+grep -RIn "wschat\|8081\|proxy_pass" /etc/nginx 2>/dev/null | head -n 80 || true
+echo "=== INTENTANDO FIX NGINX ==="
+chmod +x fix-nginx-wschat.sh 2>/dev/null || true
+bash fix-nginx-wschat.sh || echo "fix-nginx termino con codigo $?"
+echo "=== health PUBLICO tras fix (Host header) ==="
+curl -sS -H "Host: wschat.vcommunity.cloud" http://127.0.0.1/health || true
+echo
+curl -sS -o /dev/null -w "docs via nginx HTTP:%{http_code}\n" -H "Host: wschat.vcommunity.cloud" http://127.0.0.1/docs || true
 '@
     $remoteScript = $remoteScript.Replace("__REMOTE_DIR__", $RemoteDir)
 }
